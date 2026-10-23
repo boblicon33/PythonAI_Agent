@@ -1,3 +1,5 @@
+import os
+
 import uvicorn
 from starlette.applications import Starlette
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -7,10 +9,13 @@ from a2a.server.events import EventQueue
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.types import (
     AgentCard, AgentSkill, AgentCapabilities, AgentInterface,
-    TaskStatus, TaskState
+    Part
 )
 from a2a.helpers import new_task_from_user_message
 from a2a.server.tasks import TaskUpdater
+
+
+A2A_INTERFACE_URL = os.environ.get("A2A_INTERFACE_URL", "http://localhost:8000/")
 
 
 # 1. Исполнитель
@@ -26,17 +31,19 @@ class DigestReceiverExecutor(AgentExecutor):
         # Создаём TaskUpdater для управления задачей
         # context.current_task содержит задачу, если она уже была создана
         # Если нет — создаём новую из сообщения
-        from a2a.helpers import new_task_from_user_message
         task = context.current_task or new_task_from_user_message(context.message)
 
         # Отправляем задачу как первый event (обязательное правило SDK)
         await event_queue.enqueue_event(task)
 
-        # Создаём TaskUpdater и завершаем задачу
+        # Создаём TaskUpdater и завершаем задачу с подтверждением
         updater = TaskUpdater(event_queue, task.id, task.context_id)
-        await updater.complete()  # <-- используем complete() вместо update_status()
+        confirmation = updater.new_agent_message([
+            Part(text="Дайджест успешно получен и сохранён сервером.")
+        ])
+        await updater.complete(message=confirmation)
 
-        print("[A2A SERVER] Дайджест сохранен в a2a_digest_output.txt")
+        print("[A2A SERVER] Дайджест сохранен в a2a_digest_output.txt, подтверждение отправлено.")
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         pass
@@ -51,7 +58,7 @@ agent_card = AgentCard(
     default_output_modes=["text/plain"],
     capabilities=AgentCapabilities(streaming=False),
     supported_interfaces=[
-        AgentInterface(url="http://localhost:8000/", protocol_binding="JSONRPC", protocol_version="1.0")
+        AgentInterface(url=A2A_INTERFACE_URL, protocol_binding="JSONRPC", protocol_version="1.0")
     ],
     skills=[AgentSkill(
         id="receive_digest",

@@ -1,9 +1,32 @@
 services:
+  a2a-server:
+    build: .
+    command: ["python", "a2a_server.py"]
+    ports:
+      - "8000:8000"
+    environment:
+      A2A_INTERFACE_URL: http://a2a-server:8000/
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/.well-known/agent-card.json')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
   news-agent:
     build: .
+    command: ["python", "agent_client.py"]
     stdin_open: true
     tty: true
+    depends_on:
+      a2a-server:
+        condition: service_healthy
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openai.bothub.chat/v1}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.5-flash-lite}
+      A2A_URL: http://a2a-server:8000
+      CHECKPOINT_DB: /app/checkpoints/state.sqlite
     volumes:
       - ./chroma_db:/app/chroma_db
-    # environment:
-    #   - LLM_API_KEY=твой_ключ
+      - ./checkpoints:/app/checkpoints
