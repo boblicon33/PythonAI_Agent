@@ -21,3 +21,4 @@ ENV/
 # Логи и базы данных
 *.log
 *.sqlite3
+chroma_db/
