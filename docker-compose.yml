@@ -1,0 +1,9 @@
+services:
+  news-agent:
+    build: .
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./chroma_db:/app/chroma_db
+    # environment:
+    #   - LLM_API_KEY=твой_ключ
