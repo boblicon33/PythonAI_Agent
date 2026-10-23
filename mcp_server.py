@@ -1,18 +1,44 @@
 import asyncio
 import sys
 import os
-
 import re
+
 import feedparser
 from fastmcp import FastMCP
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 
-# --- ИНИЦИАЛИЗАЦИЯ RAG ---
-# Используем локальную модель для создания эмбеддингов
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-# Создаем или загружаем локальную базу данных ChromaDB в папку ./chroma_db
-vectorstore = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
+# --- ЛЕНИВАЯ ИНИЦИАЛИЗАЦИЯ RAG ---
+# HuggingFaceEmbeddings скачивает ~80MB модель при первом обращении.
+# Чтобы MCP-сервер стартовал без сети, инициализацию отложили до первого
+# вызова search_knowledge / add_to_knowledge.
+
+_embeddings = None
+_vectorstore = None
+_init_error = None
+
+
+def _ensure_vectorstore():
+    global _embeddings, _vectorstore, _init_error
+
+    if _vectorstore is not None:
+        return _vectorstore
+    if _init_error is not None:
+        raise _init_error
+
+    try:
+        from langchain_chroma import Chroma
+        from langchain_huggingface import HuggingFaceEmbeddings
+
+        _embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        _vectorstore = Chroma(
+            embedding_function=_embeddings,
+            persist_directory="./chroma_db",
+        )
+        print("[MCP] RAG (ChromaDB + all-MiniLM-L6-v2) инициализирован успешно.", file=sys.stderr)
+        return _vectorstore
+    except Exception as e:
+        _init_error = e
+        raise
+
 
 mcp = FastMCP("NewsDigestTools")
 
@@ -62,15 +88,14 @@ def save_digest(text: str) -> str:
         return f"Error saving digest: {str(e)}"
 
 
-# --- НОВЫЙ ИНСТРУМЕНТ ДЛЯ RAG ---
 @mcp.tool()
 def search_knowledge(query: str) -> str:
     """Searches the local knowledge base for similar past news.
     Use this to avoid duplicating news or to get context on a topic.
     """
     try:
-        # Ищем 2 самых похожих документа
-        docs = vectorstore.similarity_search(query, k=2)
+        vs = _ensure_vectorstore()
+        docs = vs.similarity_search(query, k=2)
         if not docs:
             return "В базе знаний пока нет информации по этой теме."
 
@@ -82,12 +107,12 @@ def search_knowledge(query: str) -> str:
         return f"Error searching knowledge base: {str(e)}"
 
 
-# --- ФУНКЦИЯ ДЛЯ СОХРАНЕНИЯ В БАЗУ (вызывается из клиента) ---
 @mcp.tool()
 def add_to_knowledge(text: str, metadata: str = "") -> str:
     """Adds a new text fragment to the knowledge base."""
     try:
-        vectorstore.add_texts(texts=[text], metadatas=[{"source": metadata}])
+        vs = _ensure_vectorstore()
+        vs.add_texts(texts=[text], metadatas=[{"source": metadata}])
         return "Успешно добавлено в базу знаний."
     except Exception as e:
         return f"Error adding to knowledge base: {str(e)}"

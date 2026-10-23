@@ -1,0 +1,13 @@
+.venv/
+venv/
+.idea/
+.git/
+__pycache__/
+*.pyc
+*.log
+*.sqlite3
+chroma_db/
+checkpoints/
+.mimocode/
+a2a_digest_output.txt
+digest_output.txt
